@@ -27,6 +27,13 @@ packets = [
     E_OUT/IP(src="10.9.0.6", dst="10.9.0.5")/TCP(sport=40002, dport=22, flags="S")/Raw(b"ssh-probe"),
 ]
 
+# Give every packet a fixed capture time so this file is byte-for-byte the
+# same on every run -- otherwise wrpcap stamps "now" and the committed
+# sample.pcap would show up as modified in git each time you run it.
+base = 1762800000.0  # a fixed instant; the exact value does not matter
+for i, p in enumerate(packets):
+    p.time = base + i
+
 here = os.path.dirname(os.path.abspath(__file__))
 out = os.path.join(here, "sample.pcap")
 wrpcap(out, packets)
