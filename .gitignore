@@ -1,0 +1,12 @@
+# Interpreter caches
+__pycache__/
+*.pyc
+
+# Output written by the pcap/ examples. sample.pcap is committed on purpose
+# (so the read examples work on a fresh clone); the rest is regenerable.
+pcap/modified.pcap
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
