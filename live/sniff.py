@@ -1,27 +1,68 @@
 #!/usr/bin/env python3
-"""Read packets as they arrive.  Live sniffing REQUIRES ROOT -- but sniff()
-can also read a capture FILE, and that runs for everyone.
+"""Continuously sniff and dissect every packet live/send.py is sending.
 
-  sniff(iface=..., prn=cb)          live capture -- needs root
-  sniff(offline="file.pcap", prn=cb) read a saved capture -- no root
+Run this in one terminal and live/send.py in another. This program calls the
+real scapy sniff() with a real prn callback -- exactly what you would write for
+a live interface -- but reads from a no-root loopback "wire" (see live/wire.py)
+so it runs in the lab without privilege.
 
-The callback (prn) is called once per packet. The two modes call it exactly
-the same way, so you develop and test your packet-handling code against a
-file, then switch to a live interface only when you actually have privilege.
+On a machine where you have root, the only change for a REAL interface is the
+source you sniff from:
+
+    sniff(iface="eth0", prn=show_pkt, store=False)   # needs root
+
+Stop with Ctrl-C.
 """
-import logging, os
+import logging
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-from scapy.all import sniff, IP
+from scapy.all import sniff, IP, TCP, UDP, ICMP, ARP, DNS, DNSQR
+
+import wire   # live/wire.py -- the no-root stand-in interface
+
+count = 0
+
+
+def describe(pkt):
+    """A short, protocol-aware line -- what a sniffer is really for."""
+    if ARP in pkt:
+        a = pkt[ARP]
+        return f"ARP   who-has {a.pdst}?  tell {a.psrc}"
+    if IP not in pkt:
+        return pkt.summary()
+    ip = pkt[IP]
+    if ICMP in pkt:
+        return f"ICMP  {ip.src} -> {ip.dst}   echo-request"
+    if TCP in pkt:
+        t = pkt[TCP]
+        return f"TCP   {ip.src} -> {ip.dst}:{t.dport}   flags={t.flags}"
+    if UDP in pkt:
+        if DNS in pkt and pkt[DNS].qdcount and pkt[DNS].qd is not None:
+            q = pkt[DNS].qd.qname.decode(errors="replace").rstrip(".")
+            if q:
+                return f"DNS   {ip.src} -> {ip.dst}   query {q}"
+        return f"UDP   {ip.src} -> {ip.dst}:{pkt[UDP].dport}   {len(pkt[UDP].payload)} bytes"
+    return f"IP    {ip.src} -> {ip.dst}   {ip.proto}"
+
 
 def show_pkt(pkt):
-    if IP in pkt:
-        print(f"   {pkt[IP].src} -> {pkt[IP].dst}   {pkt.summary()}")
+    global count
+    count += 1
+    print(f"  [{count:3d}] {describe(pkt)}")
 
-here = os.path.dirname(os.path.abspath(__file__))
-sample = os.path.join(here, "..", "pcap", "sample.pcap")
 
-print("Reading from the saved capture (no root needed):")
-sniff(offline=sample, prn=show_pkt, store=False)
+def main():
+    sock = wire.UDPWire(listen=True)
+    print(f"Sniffing the {wire.HOST}:{wire.PORT} loopback wire (no root needed).")
+    print("Start live/send.py in another terminal.  Ctrl-C to stop.\n")
+    try:
+        # The real sniff() loop: one prn call per captured packet, forever.
+        sniff(opened_socket=sock, prn=show_pkt, store=False)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
+    print(f"\nStopped. Captured {count} packet(s).")
 
-print("\nTo sniff a live interface instead (needs root):")
-print("   sudo python3 -c \"from scapy.all import sniff; sniff(prn=lambda p: p.summary(), count=5)\"")
+
+if __name__ == "__main__":
+    main()
